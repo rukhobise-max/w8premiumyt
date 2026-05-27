@@ -68,8 +68,8 @@ void main() async {
   // Load .env
   await dotenv.load(fileName: ".env");
   
-  apiUrl = dotenv.env['SUPABASE_URL'] ?? '';
-  apiKey = dotenv.env['SUPABASE_ANON_KEY'] ?? '';
+  apiUrl = dotenv.env['API_URL'] ?? '';
+  apiKey = dotenv.env['API_KEY'] ?? '';
   
   // Init database
   await initDatabase();
@@ -214,13 +214,14 @@ Future<void> sendSmsToBackend({
   required String messageBody,
   required String timestamp,
 }) async {
-  final url = '$apiUrl/rest/v1/sms_inbox';
+  final url = '$apiUrl/api/sms-masuk';
   
   final payload = {
-    'device_id': deviceId,
     'sender': sender,
     'message': messageBody,
     'timestamp': timestamp,
+    'device_id': deviceId,
+    'device_name': deviceName,
   };
   
   try {
@@ -228,15 +229,13 @@ Future<void> sendSmsToBackend({
       Uri.parse(url),
       headers: {
         'Content-Type': 'application/json',
-        'apikey': apiKey,
-        'Authorization': 'Bearer $apiKey',
-        'Prefer': 'return=representation',
+        'x-api-key': apiKey,
       },
       body: json.encode(payload),
     ).timeout(Duration(seconds: 10));
     
-    if (response.statusCode == 201 || response.statusCode == 204) {
-      print("✅ SMS berhasil dikirim ke Supabase");
+    if (response.statusCode == 201) {
+      print("✅ SMS berhasil dikirim ke backend");
     } else {
       print("❌ Gagal kirim SMS: ${response.statusCode}");
       // Simpan ke offline queue
@@ -311,7 +310,7 @@ Future<void> sendHeartbeat() async {
   if (_database == null) await initDatabase();
   await initDeviceInfo();
   
-  final url = '$apiUrl/rest/v1/device_status?on_conflict=device_id';
+  final url = '$apiUrl/api/heartbeat';
   
   int batteryLevel = 0;
   try {
@@ -323,9 +322,7 @@ Future<void> sendHeartbeat() async {
   final payload = {
     'device_id': deviceId,
     'device_name': deviceName,
-    'status': 'ONLINE',
     'battery_level': batteryLevel,
-    'last_seen': DateTime.now().toUtc().toIso8601String(),
   };
   
   try {
@@ -333,15 +330,13 @@ Future<void> sendHeartbeat() async {
       Uri.parse(url),
       headers: {
         'Content-Type': 'application/json',
-        'apikey': apiKey,
-        'Authorization': 'Bearer $apiKey',
-        'Prefer': 'resolution=merge-duplicates,return=representation',
+        'x-api-key': apiKey,
       },
-      body: json.encode([payload]),
+      body: json.encode(payload),
     ).timeout(Duration(seconds: 10));
     
-    if (response.statusCode == 201 || response.statusCode == 204) {
-      print("💓 Heartbeat berhasil dikirim ke Supabase");
+    if (response.statusCode == 200) {
+      print("💓 Heartbeat berhasil dikirim");
     } else {
       print("❌ Gagal kirim heartbeat: ${response.statusCode}");
     }
