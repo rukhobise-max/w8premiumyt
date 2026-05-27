@@ -1,97 +1,37 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:telephony/telephony.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
-import 'package:workmanager/workmanager.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:flutter_background_service_android/flutter_background_service_android.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:path/path.dart' as path;
 
 // ============================================
 // GLOBAL VARIABLES
 // ============================================
-final Telephony telephony = Telephony.instance;
 final Battery battery = Battery();
 Database? _database;
 
-String apiUrl = '';
-String apiKey = '';
+const String apiUrl = 'https://oycyuxxqmeqvyaipknkr.supabase.co';
+const String apiKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im95Y3l1eHhxbWVxdnlhaXBrbmtyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4MTc4MzMsImV4cCI6MjA5NTM5MzgzM30.LAECvRwsBvEPOz19l8cy8Hct2F4j0Lta9I-GPmIFcHI';
 String deviceId = '';
 String deviceName = '';
-
-// ============================================
-// BACKGROUND MESSAGE HANDLER (DIPANGGIL SAAT SMS MASUK)
-// ============================================
-@pragma('vm:entry-point')
-Future<void> onBackgroundMessage(SmsMessage message) async {
-  await dotenv.load(fileName: ".env");
-  
-  print("📨 SMS MASUK (Background): ${message.address} - ${message.body}");
-  
-  // Kirim ke backend
-  await sendSmsToBackend(
-    sender: message.address ?? 'Unknown',
-    messageBody: message.body ?? '',
-    timestamp: DateTime.now().toIso8601String(),
-  );
-}
-
-// ============================================
-// WORKMANAGER CALLBACK (HEARTBEAT SETIAP 10 MENIT)
-// ============================================
-@pragma('vm:entry-point')
-void callbackDispatcher() {
-  Workmanager().executeTask((task, inputData) async {
-    await dotenv.load(fileName: ".env");
-    
-    print("💓 Heartbeat task running...");
-    await sendHeartbeat();
-    
-    return Future.value(true);
-  });
-}
 
 // ============================================
 // MAIN FUNCTION
 // ============================================
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Load .env
-  await dotenv.load(fileName: ".env");
-  
-  apiUrl = dotenv.env['SUPABASE_URL'] ?? '';
-  apiKey = dotenv.env['SUPABASE_ANON_KEY'] ?? '';
-  
+
   // Init database
   await initDatabase();
-  
+
   // Init device info
   await initDeviceInfo();
-  
-  // Init background service
-  await initializeBackgroundService();
-  
-  // Register workmanager untuk heartbeat
-  await Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
-  
-  await Workmanager().registerPeriodicTask(
-    "heartbeat_task",
-    "heartbeat",
-    frequency: Duration(minutes: 15), // Minimum 15 menit di production
-    constraints: Constraints(
-      networkType: NetworkType.connected,
-    ),
-  );
-  
+
   runApp(MyApp());
 }
 
@@ -100,10 +40,10 @@ void main() async {
 // ============================================
 Future<void> initDatabase() async {
   final databasePath = await getDatabasesPath();
-  final path = join(databasePath, 'sms_queue.db');
+  final dbPath = path.join(databasePath, 'sms_queue.db');
   
   _database = await openDatabase(
-    path,
+    dbPath,
     version: 1,
     onCreate: (db, version) {
       return db.execute(
@@ -141,71 +81,6 @@ Future<void> initDeviceInfo() async {
 }
 
 // ============================================
-// INIT BACKGROUND SERVICE
-// ============================================
-Future<void> initializeBackgroundService() async {
-  final service = FlutterBackgroundService();
-  
-  const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    'sms_gateway_channel',
-    'SMS Gateway Service',
-    description: 'Service untuk menangani SMS otomatis',
-    importance: Importance.low,
-  );
-  
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
-  
-  await flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation
-          AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(channel);
-  
-  await service.configure(
-    androidConfiguration: AndroidConfiguration(
-      onStart: onStart,
-      autoStart: true,
-      isForegroundMode: true,
-      notificationChannelId: 'sms_gateway_channel',
-      initialNotificationTitle: 'W8PREMIUMYT SMS Gateway',
-      initialNotificationContent: 'Service aktif di latar belakang',
-      foregroundServiceNotificationId: 888,
-    ),
-    iosConfiguration: IosConfiguration(),
-  );
-  
-  service.startService();
-}
-
-// ============================================
-// BACKGROUND SERVICE ON START
-// ============================================
-@pragma('vm:entry-point')
-void onStart(ServiceInstance service) async {
-  await dotenv.load(fileName: ".env");
-  
-  if (service is AndroidServiceInstance) {
-    service.on('setAsForeground').listen((event) {
-      service.setAsForegroundService();
-    });
-    
-    service.on('setAsBackground').listen((event) {
-      service.setAsBackgroundService();
-    });
-  }
-  
-  service.on('stopService').listen((event) {
-    service.stopSelf();
-  });
-  
-  // Periodic sync offline queue setiap 5 menit
-  Timer.periodic(Duration(minutes: 5), (timer) async {
-    await syncOfflineQueue();
-  });
-  
-  print("✅ Background service started");
-}
-
 // ============================================
 // SEND SMS TO BACKEND
 // ============================================
@@ -377,14 +252,12 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  bool isServiceRunning = false;
   int pendingQueue = 0;
   
   @override
   void initState() {
     super.initState();
     checkPermissions();
-    checkServiceStatus();
     loadPendingQueue();
   }
   
@@ -406,28 +279,10 @@ class _HomePageState extends State<HomePage> {
       await Permission.ignoreBatteryOptimizations.request();
     }
     
-    // Setup SMS listener
-    telephony.listenIncomingSms(
-      onNewMessage: (SmsMessage message) async {
-        print("📨 SMS MASUK (Foreground): ${message.address}");
-        await sendSmsToBackend(
-          sender: message.address ?? 'Unknown',
-          messageBody: message.body ?? '',
-          timestamp: DateTime.now().toIso8601String(),
-        );
-      },
-      onBackgroundMessage: onBackgroundMessage,
-    );
+    // SMS akan ditangani oleh native BroadcastReceiver Android.
+    // Pastikan pengguna memberikan izin SMS dan telepon.
   }
   
-  // Check service status
-  Future<void> checkServiceStatus() async {
-    final service = FlutterBackgroundService();
-    final running = await service.isRunning();
-    setState(() {
-      isServiceRunning = running;
-    });
-  }
   
   // Load pending queue count
   Future<void> loadPendingQueue() async {
@@ -477,31 +332,21 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Status Card
-            Card(
-              color: isServiceRunning ? Colors.green[50] : Colors.red[50],
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  children: [
-                    Icon(
-                      isServiceRunning ? Icons.check_circle : Icons.cancel,
-                      size: 64,
-                      color: isServiceRunning ? Colors.green : Colors.red,
-                    ),
-                    SizedBox(height: 10),
-                    Text(
-                      isServiceRunning ? 'SERVICE AKTIF' : 'SERVICE MATI',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: isServiceRunning ? Colors.green : Colors.red,
+// Device Info Card
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Device: $deviceName',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
-                    ),
-                    SizedBox(height: 5),
-                    Text(
-                      'Device: $deviceName',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                      SizedBox(height: 5),
+                      Text(
+                        'Realtime SMS gateway aktif via native Android receiver.',
+                        style: TextStyle(fontSize: 14, color: Colors.grey[700]),
                     ),
                   ],
                 ),
